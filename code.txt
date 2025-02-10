@@ -1,0 +1,115 @@
+#include <Wire.h>                        // For I2C communication with LCD
+#include <LiquidCrystal_I2C.h>            // LCD I2C library
+#include <Servo.h>                        // Servo motor library
+#include <ESP8266WiFi.h>                  // WiFi library for ESP8266
+#include <ThingSpeak.h>                   // IoT platform library like ThingSpeak
+
+// I2C address for the LCD display
+LiquidCrystal_I2C lcd(0x27, 16, 2);       // Set the LCD address to 0x27 for a 16 chars and 2-line display
+
+// Servo motor
+Servo myServo;
+
+// IR sensor and servo motor pins
+const int irSensorPin1 = 2;               // IR sensor for slot 1 connected to digital pin 2
+const int irSensorPin2 = 3;               // IR sensor for slot 2 connected to digital pin 3
+const int servoPin = 9;                   // Servo motor connected to digital pin 9
+
+// WiFi credentials
+const char* ssid = "your_SSID";           // Replace with your WiFi SSID
+const char* password = "your_PASSWORD";   // Replace with your WiFi password
+
+// ThingSpeak credentials
+unsigned long channelID = YOUR_CHANNEL_ID;   // Replace with your ThingSpeak channel ID
+const char* writeAPIKey = "your_WRITE_API_KEY";  // Replace with your ThingSpeak write API key
+
+WiFiClient client;
+
+// Parking slot details
+const int totalSlots = 2;                 // Total number of parking slots
+int availableSlots = totalSlots;          // Variable to track available slots
+
+void setup() {
+  // Start serial communication for debugging
+  Serial.begin(115200);
+
+  // Initialize LCD
+  lcd.begin();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("Smart Parking");
+
+  // Initialize Servo
+  myServo.attach(servoPin);               // Attach servo to pin 9
+  myServo.write(0);                       // Start with gate closed
+
+  // Initialize IR sensor pins
+  pinMode(irSensorPin1, INPUT);
+  pinMode(irSensorPin2, INPUT);
+
+  // Connect to WiFi
+  connectToWiFi();
+
+  // Initialize ThingSpeak
+  ThingSpeak.begin(client);
+
+  // Initial LCD message
+  lcd.setCursor(0, 1);
+  lcd.print("Slots: ");
+  lcd.print(totalSlots);
+  lcd.print(" Avail: ");
+  lcd.print(availableSlots);
+}
+
+void loop() {
+  // Read IR sensor status for each slot
+  int slot1Status = digitalRead(irSensorPin1);
+  int slot2Status = digitalRead(irSensorPin2);
+
+  // Check if the slot is occupied
+  availableSlots = totalSlots - (slot1Status == LOW) - (slot2Status == LOW);
+
+  // Display available slots and total slots on LCD
+  lcd.setCursor(0, 1);
+  lcd.print("Slots: ");
+  lcd.print(totalSlots);
+  lcd.print(" Avail: ");
+  lcd.print(availableSlots);
+
+  // Control the servo motor based on slot 1 (can be modified for more slots)
+  if (slot1Status == LOW) {               // If slot 1 is occupied (IR sensor returns LOW)
+    myServo.write(90);                    // Open the gate
+  } else {
+    myServo.write(0);                     // Close the gate
+  }
+
+  // Update the parking status on ThingSpeak
+  updateCloud(availableSlots);
+
+  delay(5000);                            // Delay 5 seconds before the next reading
+}
+
+void connectToWiFi() {
+  lcd.setCursor(0, 1);
+  lcd.print("Connecting WiFi");
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  lcd.setCursor(0, 1);
+  lcd.print("WiFi Connected ");
+  Serial.println("WiFi Connected!");
+}
+
+void updateCloud(int available) {
+  ThingSpeak.setField(1, available);      // Set field 1 to the number of available slots
+  int x = ThingSpeak.writeFields(channelID, writeAPIKey);  // Write to ThingSpeak
+  if (x == 200) {
+    Serial.println("Channel update successful.");
+  } else {
+    Serial.println("Problem updating channel.");
+  }
+}
